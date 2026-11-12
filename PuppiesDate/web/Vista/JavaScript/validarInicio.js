@@ -35,7 +35,7 @@ document.addEventListener('DOMContentLoaded', function () {
             mostrarError(campos.correo, 'El correo electrónico es obligatorio.');
             return false;
         }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor)) {
+        if (!/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(valor)) {
             mostrarError(campos.correo, 'Ingresa un correo electrónico válido.');
             return false;
         }
