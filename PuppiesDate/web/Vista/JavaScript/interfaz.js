@@ -1,0 +1,501 @@
+function configurarModalAdopcion() {
+    const modal = document.getElementById("adoptionModal");
+    const content = document.getElementById("adoptionModalContent");
+
+    if (!modal || !content) {
+        return;
+    }
+
+    const cerrarModal = () => {
+        modal.classList.remove("is-open");
+        modal.setAttribute("aria-hidden", "true");
+        document.body.classList.remove("modal-open");
+        content.innerHTML = '<div class="adoption-modal-loading"><span></span><span></span><span></span></div>';
+    };
+
+    document.querySelectorAll("[data-adoption-close]").forEach((button) => {
+        button.addEventListener("click", cerrarModal);
+    });
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && modal.classList.contains("is-open")) {
+            cerrarModal();
+        }
+    });
+
+    document.querySelectorAll(".js-adoption-modal-link").forEach((link) => {
+        link.addEventListener("click", async (event) => {
+            event.preventDefault();
+            modal.classList.add("is-open");
+            modal.setAttribute("aria-hidden", "false");
+            document.body.classList.add("modal-open");
+
+            try {
+                const response = await fetch(link.href, {
+                    headers: {
+                        "X-Requested-With": "XMLHttpRequest"
+                    }
+                });
+
+                if (response.status === 401) {
+                    content.innerHTML = `
+                    <div class="adopcion-auth-required">
+                      <div class="adopcion-mascota" aria-hidden="true">
+                        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                          <path class="mascota-cola" d="M150 130 Q185 110 175 75" stroke="#F8B553" stroke-width="18" stroke-linecap="round" fill="none"/>
+                          <ellipse cx="100" cy="150" rx="58" ry="42" fill="#F8B553"/>
+                          <circle cx="100" cy="95" r="42" fill="#F8B553"/>
+                          <ellipse cx="65" cy="80" rx="16" ry="26" fill="#6D3A52" transform="rotate(-20 65 80)"/>
+                          <ellipse cx="135" cy="80" rx="16" ry="26" fill="#6D3A52" transform="rotate(20 135 80)"/>
+                          <ellipse cx="100" cy="110" rx="22" ry="16" fill="#FFF8EE"/>
+                          <ellipse cx="100" cy="106" rx="7" ry="5" fill="#6D3A52"/>
+                          <circle cx="82" cy="88" r="5" fill="#6D3A52"/>
+                          <circle cx="118" cy="88" r="5" fill="#6D3A52"/>
+                          <path d="M96 122 Q100 138 104 122 Z" fill="#DA74A3"/>
+                          <ellipse cx="75" cy="185" rx="14" ry="9" fill="#FFF8EE"/>
+                          <ellipse cx="125" cy="185" rx="14" ry="9" fill="#FFF8EE"/>
+                        </svg>
+                      </div>
+                      <h3>¡Espera un momento!</h3>
+                      <p>Para adoptar debes iniciar sesión o registrarte primero.</p>
+                      <div class="adopcion-auth-botones">
+                        <a href="${window.ctxApp || ""}/Iniciar" class="btn-menu btn-verde-activo">Iniciar sesión</a>
+                        <a href="${window.ctxApp || ""}/Registrarse" class="btn-menu btn-rosa-sesion">Registrarme</a>
+                      </div>
+                    </div>`;
+                    return;
+                }
+
+                // Recibimos el HTML directamente sin usar DOMParser
+                const html = await response.text();
+
+                // Inyectamos el contenido devuelto por el Servlet (sea el aviso o el formulario)
+                content.innerHTML = html;
+
+                // Si se cargó el formulario completo, inicializamos eventos adicionales de ubicación
+                if (content.querySelector(".adopcion-wrap") && typeof inicializarUbicacionAdopcion === "function") {
+                    inicializarUbicacionAdopcion();
+                }
+            } catch (error) {
+                console.error("Error al cargar el modal:", error);
+                content.innerHTML = '<p class="sin-perritos">No pudimos cargar el formulario. Intenta de nuevo.</p>';
+            }
+        });
+    });
+
+   
+    content.addEventListener("submit", async (event) => {
+        const form = event.target;
+        if (!form.matches('form[action*="SolicitudAdopcionCliente"]')) {
+            return;
+        }
+
+        event.preventDefault();
+
+        if (typeof validarSolicitudAdopcion === "function" && !validarSolicitudAdopcion()) {
+            return;
+        }
+
+        const boton = form.querySelector('button[type="submit"]');
+        if (boton) {
+            boton.disabled = true;
+            boton.textContent = "Enviando...";
+        }
+
+        try {
+            const response = await fetch(form.action, {
+                method: "POST",
+                headers: {
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: new FormData(form)
+            });
+
+            const html = await response.text();
+
+            if (html.includes("mensaje-exito")) {
+                mostrarModalExito();
+                cerrarModal();
+            } else {
+                content.innerHTML = html;
+                if (content.querySelector(".adopcion-wrap") && typeof inicializarUbicacionAdopcion === "function") {
+                    inicializarUbicacionAdopcion();
+                }
+            }
+        } catch (error) {
+            console.error("Error al enviar la solicitud:", error);
+            if (boton) {
+                boton.disabled = false;
+                boton.textContent = "Enviar solicitud";
+            }
+        }
+    });
+
+    function mostrarModalExito() {
+        const modalExito = document.getElementById("modalExitoAdopcion");
+        if (modalExito) {
+            modalExito.classList.add("is-open");
+        }
+    }
+}
+
+
+function validarSolicitudAdopcion() {
+    const campos = [
+        ["direccion", "Ingresa tu dirección."],
+        ["localidad", "Ingresa tu localidad."],
+        ["barrio", "Ingresa tu barrio."],
+        ["profesion", "Ingresa tu profesión."],
+        ["vive_en", "Selecciona dónde vives."],
+        ["tipo_vivienda", "Selecciona el tipo de vivienda."],
+        ["nucleo_familiar", "Cuéntanos sobre tu núcleo familiar."]
+    ];
+
+    let valido = true;
+
+    campos.forEach(([id, mensaje]) => {
+        const campo = document.getElementById(id);
+        const error = document.getElementById(`error_${id}`);
+
+        if (!campo) {
+            return;
+        }
+
+        const vacio = !campo.value || !campo.value.trim();
+
+        if (error) {
+            error.textContent = vacio ? mensaje : "";
+        }
+
+        campo.classList.toggle("campo-error", vacio);
+
+        if (vacio) {
+            valido = false;
+    }
+    });
+
+    return valido;
+}
+
+
+// Menú hamburguesa
+document.addEventListener('DOMContentLoaded', function () {
+    const menuToggle = document.getElementById('menuToggle');
+    const navMenu = document.getElementById('navMenu');
+
+    if (menuToggle && navMenu) {
+        menuToggle.addEventListener('click', function () {
+            const isOpen = navMenu.classList.toggle('is-open');
+            menuToggle.classList.toggle('is-open', isOpen);
+            menuToggle.setAttribute('aria-expanded', isOpen);
+        });
+
+
+        navMenu.querySelectorAll('a').forEach(function (link) {
+            link.addEventListener('click', function () {
+                navMenu.classList.remove('is-open');
+                menuToggle.classList.remove('is-open');
+                menuToggle.setAttribute('aria-expanded', 'false');
+            });
+        });
+    }
+});
+
+
+document.addEventListener('DOMContentLoaded', function () {
+    configurarModalAdopcion();
+});
+
+(function () {
+    var filtroEspecie = document.getElementById('filtroEspecie');
+    var filtroRaza = document.getElementById('filtroRaza');
+    var tarjetas = document.querySelectorAll('#gridPerritos .tarjeta-perrito');
+    var mensajeVacio = document.getElementById('sinResultadosFiltro');
+
+    if (!filtroRaza) {
+        return;
+    }
+
+    var opcionesRazaOriginales = Array.from(filtroRaza.options);
+
+    function repoblarRazas(especieSeleccionada) {
+        var razasValidas = null;
+        if (especieSeleccionada !== 'todas' && window.razasPorEspecie) {
+            razasValidas = window.razasPorEspecie[especieSeleccionada] || [];
+        }
+
+        filtroRaza.innerHTML = '';
+        opcionesRazaOriginales.forEach(function (opcion) {
+            if (opcion.value === 'todas' || razasValidas === null || razasValidas.indexOf(opcion.value) !== -1) {
+                filtroRaza.appendChild(opcion.cloneNode(true));
+            }
+        });
+        filtroRaza.value = 'todas';
+    }
+
+    function aplicarFiltros() {
+        var especieSeleccionada = filtroEspecie ? filtroEspecie.value : 'todas';
+        var razaSeleccionada = filtroRaza.value;
+        var visibles = 0;
+
+        tarjetas.forEach(function (tarjeta) {
+            var coincideEspecie = especieSeleccionada === 'todas' || tarjeta.dataset.especie === especieSeleccionada;
+            var coincideRaza = razaSeleccionada === 'todas' || tarjeta.dataset.raza === razaSeleccionada;
+            var coincide = coincideEspecie && coincideRaza;
+            tarjeta.style.display = coincide ? '' : 'none';
+            if (coincide) {
+                visibles++;
+            }
+        });
+
+        if (mensajeVacio) {
+            mensajeVacio.style.display = visibles === 0 ? 'block' : 'none';
+        }
+    }
+
+    if (filtroEspecie) {
+        filtroEspecie.addEventListener('change', function () {
+            repoblarRazas(filtroEspecie.value);
+            aplicarFiltros();
+        });
+    }
+
+    filtroRaza.addEventListener('change', aplicarFiltros);
+})();
+
+// Precio dinámico al seleccionar actividad
+function configurarPrecioActividad() {
+    const select = document.getElementById('actividad');
+    const textoPrecio = document.getElementById('precioActividadTexto');
+
+    if (!select || !textoPrecio) {
+        return;
+    }
+
+    function actualizarPrecio() {
+        const opcion = select.options[select.selectedIndex];
+        const precio = opcion ? opcion.getAttribute('data-precio') : '';
+
+        if (precio && precio.trim() !== '') {
+            textoPrecio.textContent = 'Precio: ' + precio;
+            textoPrecio.style.display = 'block';
+        } else {
+            textoPrecio.style.display = 'none';
+        }
+    }
+
+    select.addEventListener('change', actualizarPrecio);
+    actualizarPrecio();
+}
+// Modal de fechas disponibles
+function configurarModalFechasDisponibles() {
+    const boton = document.getElementById('btnVerFechas');
+    const modal = document.getElementById('fechasModal');
+    const cerrar = document.getElementById('cerrarFechasModal');
+    const contenido = document.getElementById('fechasModalContent');
+    const form = document.getElementById('formReserva');
+
+    if (!boton || !modal || !contenido || !form) {
+        return;
+    }
+
+    const ctx = form.dataset.ctx || '';
+
+    const abrirModal = async () => {
+        modal.classList.add('is-open');
+        contenido.innerHTML = '<div class="adoption-modal-loading"><span></span><span></span><span></span></div>';
+
+        try {
+            const response = await fetch(ctx + '/ConsultarFechasDisponibles');
+            const html = await response.text();
+            contenido.innerHTML = html;
+        } catch (error) {
+            console.error('Error al cargar fechas disponibles:', error);
+            contenido.innerHTML = '<p class="sin-perritos">No pudimos cargar las fechas. Intenta de nuevo.</p>';
+        }
+    };
+
+    const cerrarModal = () => {
+        modal.classList.remove('is-open');
+    };
+
+    boton.addEventListener('click', abrirModal);
+    cerrar.addEventListener('click', cerrarModal);
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    configurarPrecioActividad();
+    configurarModalFechasDisponibles();
+});
+
+
+// Menú desplegable de usuario (circulito con inicial)
+document.addEventListener('DOMContentLoaded', function () {
+    const userToggle = document.getElementById('userDropdownToggle');
+    const userMenu = document.getElementById('userDropdownMenu');
+
+    if (userToggle && userMenu) {
+        userToggle.addEventListener('click', function (event) {
+            event.stopPropagation(); // evita que el click document cierre el menú al abrirlo
+            const isOpen = userMenu.classList.toggle('is-open');
+            userToggle.setAttribute('aria-expanded', isOpen);
+        });
+
+        // Cerrar si se hace clic fuera del menú
+        document.addEventListener('click', function (event) {
+            if (!userMenu.contains(event.target) && !userToggle.contains(event.target)) {
+                userMenu.classList.remove('is-open');
+                userToggle.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        // Cerrar con tecla Escape
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && userMenu.classList.contains('is-open')) {
+                userMenu.classList.remove('is-open');
+                userToggle.setAttribute('aria-expanded', 'false');
+            }
+        });
+    }
+});
+
+// Cerrar el modal de éxito al enviar una solicitud de adopción
+document.addEventListener('DOMContentLoaded', function () {
+    const modalExito = document.getElementById('modalExitoAdopcion');
+    if (modalExito) {
+        modalExito.querySelectorAll('[data-cerrar-exito]').forEach(function (el) {
+            el.addEventListener('click', function () {
+                modalExito.classList.remove('is-open');
+            });
+        });
+    }
+});
+
+
+// Botón "Ir a Iniciar Sesión" del modal de registro exitoso
+document.addEventListener('DOMContentLoaded', function () {
+    const btnIrIniciarSesion = document.getElementById('btnIrIniciarSesion');
+    if (btnIrIniciarSesion) {
+        btnIrIniciarSesion.addEventListener('click', function () {
+            window.location.href = this.dataset.url;
+        });
+    }
+});
+
+// Modal de confirmación al cerrar sesión
+document.addEventListener('DOMContentLoaded', function () {
+    const logoutModal = document.getElementById('logoutModal');
+    if (!logoutModal) {
+        return;
+    }
+
+    // Guarda la URL a la que debía navegar el link original (${ctx}/CerrarSesion)
+    // para poder usarla cuando el usuario confirme dentro del modal.
+    let logoutUrl = null;
+
+    const abrirLogoutModal = (event) => {
+        event.preventDefault();
+        logoutUrl = event.currentTarget.href;
+        logoutModal.classList.add('is-open');
+        logoutModal.setAttribute('aria-hidden', 'false');
+    };
+
+    const cerrarLogoutModal = () => {
+        logoutModal.classList.remove('is-open');
+        logoutModal.setAttribute('aria-hidden', 'true');
+    };
+
+    document.querySelectorAll('.js-logout-link').forEach(function (link) {
+        link.addEventListener('click', abrirLogoutModal);
+    });
+
+    logoutModal.querySelectorAll('[data-logout-close]').forEach(function (btn) {
+        btn.addEventListener('click', cerrarLogoutModal);
+    });
+
+
+    logoutModal.querySelectorAll('[data-logout-confirm]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (logoutUrl) {
+                window.location.href = logoutUrl;
+            }
+        });
+    });
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && logoutModal.classList.contains('is-open')) {
+            cerrarLogoutModal();
+        }
+    });
+});
+
+
+document.addEventListener('DOMContentLoaded', function () {
+    const menuToggleAdmin = document.getElementById('menuToggleAdmin');
+    const sidebarAdmin = document.getElementById('sidebarAdmin');
+
+    if (menuToggleAdmin && sidebarAdmin) {
+        menuToggleAdmin.addEventListener('click', function (e) {
+            e.stopPropagation();
+
+            // Alternar estado visible del sidebar
+            sidebarAdmin.classList.toggle('is-open');
+
+            // Actualizar atributo de accesibilidad
+            const isOpen = sidebarAdmin.classList.contains('is-open');
+            menuToggleAdmin.setAttribute('aria-expanded', isOpen);
+        });
+
+        // Cerrar menú al hacer clic fuera de él en pantallas móviles
+        document.addEventListener('click', function (e) {
+            if (window.innerWidth <= 768 &&
+                    sidebarAdmin.classList.contains('is-open') &&
+                    !sidebarAdmin.contains(e.target)) {
+                sidebarAdmin.classList.remove('is-open');
+                menuToggleAdmin.setAttribute('aria-expanded', 'false');
+            }
+        });
+    }
+});
+
+function abrirModalCancelar(idReserva) {
+    document.getElementById('idReservaCancelar').value = idReserva;
+    document.getElementById('modalCancelar').style.display = 'flex';
+}
+function cerrarModalCancelar() {
+    document.getElementById('modalCancelar').style.display = 'none';
+}
+
+
+
+// ===== Filtro de estado en "Mis solicitudes de adopción" =====
+document.addEventListener('DOMContentLoaded', function () {
+    var filtro = document.getElementById('filtroEstadoSolicitud');
+    if (!filtro) return;
+
+    var secciones = document.querySelectorAll('.seccion-solicitudes');
+    var mensajeVacio = document.getElementById('sinResultadosFiltro');
+
+    filtro.addEventListener('change', function () {
+        var valor = filtro.value;
+        var totalVisibles = 0;
+
+        secciones.forEach(function (seccion) {
+            var filasSeccion = seccion.querySelectorAll('[data-tabla-solicitudes] tbody tr');
+            var visiblesEnSeccion = 0;
+
+            filasSeccion.forEach(function (fila) {
+                var coincide = (valor === 'todas' || fila.dataset.estado === valor);
+                fila.classList.toggle('oculto', !coincide);
+                if (coincide) visiblesEnSeccion++;
+            });
+
+            seccion.classList.toggle('oculto', filasSeccion.length > 0 && visiblesEnSeccion === 0);
+            totalVisibles += visiblesEnSeccion;
+        });
+
+        if (mensajeVacio) {
+            mensajeVacio.classList.toggle('oculto', totalVisibles !== 0);
+        }
+    });
+});
